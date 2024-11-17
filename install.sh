@@ -27,21 +27,28 @@ check_root() {
 }
 
 # Function to check GitHub token
-# Function to check GitHub token
 check_github_token() {
     local token=$1
     log_info "Verifying GitHub token..."
     
     # Check token with GitHub API
+    log_info "Checking user access..."
     local response=$(curl -s -H "Authorization: Bearer $token" \
                         -H "Accept: application/vnd.github+json" \
                         https://api.github.com/user)
     
+    echo "User API Response:"
+    echo "$response" | jq '.'
+    
     if echo "$response" | grep -q '"login"'; then
         # Verify package access specifically for npm packages
+        log_info "Checking package access..."
         local pkg_response=$(curl -s -H "Authorization: Bearer $token" \
                                -H "Accept: application/vnd.github+json" \
                                "https://api.github.com/orgs/flxbl-io/packages?package_type=npm")
+        
+        echo "Package API Response:"
+        echo "$pkg_response" | jq '.'
         
         if echo "$pkg_response" | grep -q "sfp"; then
             log_success "GitHub token verified - Has package access"
@@ -53,14 +60,15 @@ check_github_token() {
             return 0
         else
             log_error "GitHub token lacks package access permissions"
+            log_error "Make sure your token has read:packages scope and access to flxbl-io organization's npm packages"
             return 1
         fi
     else
         log_error "Invalid GitHub token"
+        log_error "Response indicates authentication failure"
         return 1
     fi
 }
-
 # Install Node.js 20
 install_node() {
     log_info "Installing Node.js 20..."
