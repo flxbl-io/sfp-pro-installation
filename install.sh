@@ -27,6 +27,7 @@ check_root() {
 }
 
 # Function to check GitHub token
+# Function to check GitHub token
 check_github_token() {
     local token=$1
     log_info "Verifying GitHub token..."
@@ -37,12 +38,12 @@ check_github_token() {
                         https://api.github.com/user)
     
     if echo "$response" | grep -q '"login"'; then
-        # Verify package access
+        # Verify package access specifically for npm packages
         local pkg_response=$(curl -s -H "Authorization: Bearer $token" \
                                -H "Accept: application/vnd.github+json" \
-                               https://api.github.com/orgs/flxbl-io/packages)
+                               "https://api.github.com/orgs/flxbl-io/packages?package_type=npm")
         
-        if echo "$pkg_response" | grep -q "sfp-pro"; then
+        if echo "$pkg_response" | grep -q "sfp"; then
             log_success "GitHub token verified - Has package access"
             # Configure npm for GitHub packages
             echo "//npm.pkg.github.com/:_authToken=$token" > ~/.npmrc
