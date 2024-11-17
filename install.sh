@@ -140,7 +140,7 @@ install_supabase() {
 # Install SFP CLI
 install_sfp() {
     log_info "Installing SFP CLI..."
-    npm install -g @flxbl-io/sfp
+    npm install -g @flxbl-io/sfp@web
     log_success "SFP CLI installed"
 }
 
