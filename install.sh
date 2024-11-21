@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Set strict error handling
+set -e
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -13,6 +16,17 @@ log_success() { printf "${GREEN}${TICK} %s${NC}\n" "$1"; }
 log_error() { printf "${RED}${CROSS} %s${NC}\n" "$1" >&2; }
 log_warn() { printf "${YELLOW}! %s${NC}\n" "$1"; }
 log_info() { printf "• %s\n" "$1"; }
+
+# Global cleanup function for the entire script
+cleanup_script() {
+    log_info "Performing final cleanup..."
+    # Clean any temporary npm configurations that might exist
+    find /tmp -name 'npm.*.rc' -type f -mmin -5 -exec rm -f {} \;
+    log_success "Cleanup completed"
+}
+
+# Set up script-level cleanup trap
+trap cleanup_script EXIT SIGINT SIGTERM ERR
 
 # Check if running with sudo/root
 check_root() {
@@ -144,6 +158,12 @@ Options:
 
 Environment variables:
     FLXBL_NPM_REGISTRY_KEY    GitHub token for npm registry authentication
+
+Examples:
+    $0                        # Full installation with latest version
+    $0 --update              # Update SFP CLI to latest version
+    $0 --version 1.2.3       # Full installation with specific version
+    $0 -u -v 1.2.3          # Update only SFP CLI to version 1.2.3
 "
 }
 
@@ -152,6 +172,8 @@ npm_install_authenticated() {
     local package=$1
     local version=$2
     local token=${FLXBL_NPM_REGISTRY_KEY:-$3}
+    local temp_npmrc=""
+    local exit_code=0
     
     if [ -z "$token" ]; then
         log_error "No npm registry token provided. Please set FLXBL_NPM_REGISTRY_KEY"
@@ -167,15 +189,39 @@ npm_install_authenticated() {
 
     log_info "Installing ${full_package}..."
 
-    # Use --auth-token flag directly with npm command
-    if NPM_CONFIG_REGISTRY=https://npm.pkg.github.com \
-       npm install -g --auth-token="${token}" "${full_package}"; then
+    # Function to cleanup temp files
+    cleanup() {
+        local temp_file=$1
+        if [ ! -z "$temp_file" ] && [ -f "$temp_file" ]; then
+            log_info "Cleaning up temporary npm configuration..."
+            rm -f "$temp_file"
+        fi
+    }
+
+    # Create temporary .npmrc
+    temp_npmrc=$(mktemp)
+    
+    # Set up cleanup trap for various signals
+    trap "cleanup '$temp_npmrc'" EXIT SIGINT SIGTERM ERR
+
+    # Configure npm
+    {
+        echo "@flxbl-io:registry=https://npm.pkg.github.com/"
+        echo "//npm.pkg.github.com/:_authToken=${token}"
+        echo "registry=https://registry.npmjs.org/"
+    } > "$temp_npmrc"
+    
+    # Use temporary .npmrc file
+    if NPM_CONFIG_USERCONFIG="$temp_npmrc" npm install -g "${full_package}"; then
         log_success "Successfully installed ${full_package}"
-        return 0
+        exit_code=0
     else
         log_error "Failed to install ${full_package}"
-        return 1
+        exit_code=1
     fi
+
+    # Cleanup will happen automatically via trap
+    return $exit_code
 }
 
 # Install SFP function
