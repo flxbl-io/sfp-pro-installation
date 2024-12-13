@@ -134,7 +134,7 @@ install_infisical() {
 install_supabase() {
     log_info "Installing Supabase CLI..."
     if ! command -v supabase &> /dev/null; then
-        local version="1.127.3"  # Update this version as needed
+        local version="2.0.0"  # Update this version as needed
         wget -O /tmp/supabase.deb \
             "https://github.com/supabase/cli/releases/download/v${version}/supabase_${version}_linux_amd64.deb"
         dpkg -i /tmp/supabase.deb || apt-get install -f -y
@@ -160,10 +160,10 @@ Environment variables:
     FLXBL_NPM_REGISTRY_KEY    GitHub token for npm registry authentication
 
 Examples:
-    $0                        # Full installation with latest version
+    $0                       # Full installation with latest version
     $0 --update              # Update SFP CLI to latest version
     $0 --version 1.2.3       # Full installation with specific version
-    $0 -u -v 1.2.3          # Update only SFP CLI to version 1.2.3
+    $0 -u -v 1.2.3           # Update only SFP CLI to version 1.2.3
 "
 }
 
