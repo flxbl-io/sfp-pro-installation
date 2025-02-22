@@ -17,6 +17,22 @@ log_error() { printf "${RED}${CROSS} %s${NC}\n" "$1" >&2; }
 log_warn() { printf "${YELLOW}! %s${NC}\n" "$1"; }
 log_info() { printf "• %s\n" "$1"; }
 
+# Detect OS type
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$NAME
+        VERSION=$VERSION_ID
+    elif [ -f /etc/redhat-release ]; then
+        OS=$(cat /etc/redhat-release | cut -d' ' -f1)
+    elif command -v lsb_release >/dev/null 2>&1; then
+        OS=$(lsb_release -si)
+    else
+        OS=$(uname -s)
+    fi
+    echo "$OS"
+}
+
 # Global cleanup function for the entire script
 cleanup_script() {
     log_info "Performing final cleanup..."
@@ -68,12 +84,43 @@ check_github_token() {
     fi
 }
 
+# Package manager wrapper
+pkg_install() {
+    local packages=("$@")
+    local os_type=$(detect_os)
+    
+    case "$os_type" in
+        *"Amazon Linux"*)
+            log_info "Using Amazon Linux package manager (yum)"
+            yum install -y "${packages[@]}"
+            ;;
+        *"Ubuntu"*|*"Debian"*)
+            log_info "Using Debian package manager (apt-get)"
+            apt-get install -y "${packages[@]}"
+            ;;
+        *)
+            log_error "Unsupported OS: $os_type"
+            exit 1
+            ;;
+    esac
+}
+
 # Install Node.js 20
 install_node() {
     log_info "Installing Node.js 20..."
+    local os_type=$(detect_os)
+    
     if ! command -v node &> /dev/null; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-        apt-get install -y nodejs
+        case "$os_type" in
+            *"Amazon Linux"*)
+                curl -sL https://rpm.nodesource.com/setup_20.x | bash -
+                yum install -y nodejs
+                ;;
+            *"Ubuntu"*|*"Debian"*)
+                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                apt-get install -y nodejs
+                ;;
+        esac
         log_success "Node.js $(node --version) installed"
     else
         local version=$(node --version)
@@ -81,8 +128,16 @@ install_node() {
             log_success "Node.js $version already installed"
         else
             log_warn "Updating Node.js to version 20..."
-            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-            apt-get install -y nodejs
+            case "$os_type" in
+                *"Amazon Linux"*)
+                    curl -sL https://rpm.nodesource.com/setup_20.x | bash -
+                    yum install -y nodejs
+                    ;;
+                *"Ubuntu"*|*"Debian"*)
+                    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                    apt-get install -y nodejs
+                    ;;
+            esac
             log_success "Node.js $(node --version) installed"
         fi
     fi
@@ -91,26 +146,32 @@ install_node() {
 # Install Docker
 install_docker() {
     log_info "Installing Docker..."
+    local os_type=$(detect_os)
+    
     if ! command -v docker &> /dev/null; then
-        # Install Docker's prerequisites
-        apt-get update
-        apt-get install -y ca-certificates curl gnupg
-
-        # Add Docker's official GPG key
-        install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-        chmod a+r /etc/apt/keyrings/docker.asc
-
-        # Add the repository to Apt sources
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-        apt-get update
-        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-        # Start and enable Docker
+        case "$os_type" in
+            *"Amazon Linux"*)
+                yum install -y docker
+                systemctl start docker
+                systemctl enable docker
+                # Install Docker Compose
+                mkdir -p /usr/local/lib/docker/cli-plugins/
+                curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
+                chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+                ;;
+            *"Ubuntu"*|*"Debian"*)
+                apt-get update
+                apt-get install -y ca-certificates curl gnupg
+                install -m 0755 -d /etc/apt/keyrings
+                curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+                chmod a+r /etc/apt/keyrings/docker.asc
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+                apt-get update
+                apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+                ;;
+        esac
         systemctl start docker
         systemctl enable docker
-
         log_success "Docker installed"
     else
         log_success "Docker already installed"
@@ -120,10 +181,21 @@ install_docker() {
 # Install Infisical CLI
 install_infisical() {
     log_info "Installing Infisical CLI..."
+    local os_type=$(detect_os)
+    
     if ! command -v infisical &> /dev/null; then
-        curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash
-        apt-get update
-        apt-get install -y infisical
+        case "$os_type" in
+            *"Amazon Linux"*)
+                # Add Infisical repository for RHEL/Amazon Linux
+                curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.rpm.sh' | bash
+                yum install -y infisical
+                ;;
+            *"Ubuntu"*|*"Debian"*)
+                curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash
+                apt-get update
+                apt-get install -y infisical
+                ;;
+        esac
         log_success "Infisical CLI installed"
     else
         log_success "Infisical CLI already installed"
@@ -135,10 +207,22 @@ install_supabase() {
     log_info "Installing Supabase CLI..."
     if ! command -v supabase &> /dev/null; then
         local version="2.0.0"  # Update this version as needed
-        wget -O /tmp/supabase.deb \
-            "https://github.com/supabase/cli/releases/download/v${version}/supabase_${version}_linux_amd64.deb"
-        dpkg -i /tmp/supabase.deb || apt-get install -f -y
-        rm /tmp/supabase.deb
+        local os_type=$(detect_os)
+        
+        case "$os_type" in
+            *"Amazon Linux"*)
+                wget -O /tmp/supabase.rpm \
+                    "https://github.com/supabase/cli/releases/download/v${version}/supabase_${version}_linux_amd64.rpm"
+                rpm -i /tmp/supabase.rpm
+                rm /tmp/supabase.rpm
+                ;;
+            *"Ubuntu"*|*"Debian"*)
+                wget -O /tmp/supabase.deb \
+                    "https://github.com/supabase/cli/releases/download/v${version}/supabase_${version}_linux_amd64.deb"
+                dpkg -i /tmp/supabase.deb || apt-get install -f -y
+                rm /tmp/supabase.deb
+                ;;
+        esac
         log_success "Supabase CLI installed"
     else
         log_success "Supabase CLI already installed"
