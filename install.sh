@@ -376,6 +376,9 @@ main() {
         esac
     done
 
+    local os_type=$(detect_os)
+    log_info "Detected OS: $os_type"
+
     if [ "$update_only" = true ]; then
         echo "
 ╔═══════════════════════════════════════╗
@@ -438,9 +441,17 @@ main() {
         exit 0
     fi
 
-    # Full installation
-    apt-get update
-    apt-get install -y curl wget jq git
+    # Install basic tools based on OS
+    case "$os_type" in
+        *"Amazon Linux"*|*"Red Hat"*|*"CentOS"*)
+            yum update -y
+            yum install -y curl wget jq git
+            ;;
+        *"Ubuntu"*|*"Debian"*)
+            apt-get update
+            apt-get install -y curl wget jq git
+            ;;
+    esac
 
     # Install all prerequisites
     install_node
@@ -469,6 +480,3 @@ You can now use the 'sfp' command to manage your SFP installation.
 Get started with: sfp server init --help
 "
 }
-
-# Execute main with all arguments
-main "$@"
