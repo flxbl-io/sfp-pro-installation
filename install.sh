@@ -93,77 +93,24 @@ check_github_token() {
     fi
 }
 
-# Install Node.js 20
+# Install Node.js
 install_node() {
     local os_family=$1
-    log_info "Installing Node.js 20..."
+    log_info "Installing Node.js..."
     
-    # Check if we're on ARM64 Amazon Linux 2
-    local is_arm64_al2=false
-    if [ "$os_family" = "fedora" ] && grep -q "Amazon Linux release 2" /etc/system-release 2>/dev/null; then
-        if [ "$(uname -m)" = "aarch64" ]; then
-            is_arm64_al2=true
-        fi
-    fi
-    
-    if [ "$is_arm64_al2" = true ]; then
-        log_info "Detected ARM64 Amazon Linux 2, using nvm for installation..."
-        
-        # Install nvm
-        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-        
-        # Load nvm
-        export NVM_DIR="$HOME/.nvm"
-        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-        
-        # Install Node.js 20
-        nvm install 20
-        nvm use 20
-        
-        # Make it available system-wide
-        local node_path=$(which node)
-        local npm_path=$(which npm)
-        
-        if [ -n "$node_path" ] && [ -n "$npm_path" ]; then
-            ln -sf "$node_path" /usr/local/bin/node
-            ln -sf "$npm_path" /usr/local/bin/npm
-            log_success "Node.js $(node --version) installed via nvm"
-        else
-            log_error "Failed to install Node.js via nvm"
-            return 1
-        fi
+    if ! command -v node &> /dev/null; then
+        case "$os_family" in
+            "fedora")
+                yum install -y nodejs
+                ;;
+            "debian")
+                curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+                apt-get install -y nodejs
+                ;;
+        esac
+        log_success "Node.js $(node --version) installed"
     else
-        if ! command -v node &> /dev/null; then
-            case "$os_family" in
-                "fedora")
-                    curl -sL https://rpm.nodesource.com/setup_20.x | bash -
-                    yum install -y nodejs
-                    ;;
-                "debian")
-                    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-                    apt-get install -y nodejs
-                    ;;
-            esac
-            log_success "Node.js $(node --version) installed"
-        else
-            local version=$(node --version)
-            if [[ ${version:1:2} -ge 20 ]]; then
-                log_success "Node.js $version already installed"
-            else
-                log_warn "Updating Node.js to version 20..."
-                case "$os_family" in
-                    "fedora")
-                        curl -sL https://rpm.nodesource.com/setup_20.x | bash -
-                        yum install -y nodejs
-                        ;;
-                    "debian")
-                        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-                        apt-get install -y nodejs
-                        ;;
-                esac
-                log_success "Node.js $(node --version) installed"
-            fi
-        fi
+        log_success "Node.js $(node --version) already installed"
     fi
 }
 
