@@ -17,32 +17,46 @@ log_error() { printf "${RED}${CROSS} %s${NC}\n" "$1" >&2; }
 log_warn() { printf "${YELLOW}! %s${NC}\n" "$1"; }
 log_info() { printf "• %s\n" "$1"; }
 
-# Detect OS type
-detect_os() {
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        OS=$NAME
-        VERSION=$VERSION_ID
-    elif [ -f /etc/redhat-release ]; then
-        OS=$(cat /etc/redhat-release | cut -d' ' -f1)
-    elif command -v lsb_release >/dev/null 2>&1; then
-        OS=$(lsb_release -si)
-    else
-        OS=$(uname -s)
-    fi
-    echo "$OS"
-}
-
-# Global cleanup function for the entire script
+# Global cleanup function
 cleanup_script() {
     log_info "Performing final cleanup..."
-    # Clean any temporary npm configurations that might exist
     find /tmp -name 'npm.*.rc' -type f -mmin -5 -exec rm -f {} \;
     log_success "Cleanup completed"
 }
 
 # Set up script-level cleanup trap
 trap cleanup_script EXIT SIGINT SIGTERM ERR
+
+# Detect if system is Fedora-based (RHEL, CentOS, Amazon Linux) or Debian-based
+detect_os_family() {
+    if [ -f /etc/redhat-release ] || [ -f /etc/system-release ]; then
+        echo "fedora"
+    elif [ -f /etc/debian_version ]; then
+        echo "debian"
+    else
+        echo "unknown"
+    fi
+}
+
+# Package manager wrapper
+pkg_install() {
+    local os_family=$1
+    shift
+    local packages=("$@")
+    
+    case "$os_family" in
+        "fedora")
+            yum install -y "${packages[@]}"
+            ;;
+        "debian")
+            apt-get install -y "${packages[@]}"
+            ;;
+        *)
+            log_error "Unsupported OS family"
+            exit 1
+            ;;
+    esac
+}
 
 # Check if running with sudo/root
 check_root() {
@@ -57,15 +71,11 @@ check_github_token() {
     local token=$1
     log_info "Verifying GitHub token..."
     
-    # Check token with GitHub API
-    log_info "Checking user access..."
     local response=$(curl -s -H "Authorization: Bearer $token" \
                         -H "Accept: application/vnd.github+json" \
                         https://api.github.com/user)
     
     if echo "$response" | grep -q '"login"'; then
-        # Verify package access specifically for npm packages
-        log_info "Checking package access..."
         local pkg_response=$(curl -s -H "Authorization: Bearer $token" \
                                -H "Accept: application/vnd.github+json" \
                                "https://api.github.com/orgs/flxbl-io/packages?package_type=npm")
@@ -75,7 +85,6 @@ check_github_token() {
             return 0
         else
             log_error "GitHub token lacks package access permissions"
-            log_error "Make sure your token has read:packages scope"
             return 1
         fi
     else
@@ -84,39 +93,18 @@ check_github_token() {
     fi
 }
 
-# Package manager wrapper
-pkg_install() {
-    local packages=("$@")
-    local os_type=$(detect_os)
-    
-    case "$os_type" in
-        *"Amazon Linux"*)
-            log_info "Using Amazon Linux package manager (yum)"
-            yum install -y "${packages[@]}"
-            ;;
-        *"Ubuntu"*|*"Debian"*)
-            log_info "Using Debian package manager (apt-get)"
-            apt-get install -y "${packages[@]}"
-            ;;
-        *)
-            log_error "Unsupported OS: $os_type"
-            exit 1
-            ;;
-    esac
-}
-
 # Install Node.js 20
 install_node() {
+    local os_family=$1
     log_info "Installing Node.js 20..."
-    local os_type=$(detect_os)
     
     if ! command -v node &> /dev/null; then
-        case "$os_type" in
-            *"Amazon Linux"*)
+        case "$os_family" in
+            "fedora")
                 curl -sL https://rpm.nodesource.com/setup_20.x | bash -
                 yum install -y nodejs
                 ;;
-            *"Ubuntu"*|*"Debian"*)
+            "debian")
                 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
                 apt-get install -y nodejs
                 ;;
@@ -128,12 +116,12 @@ install_node() {
             log_success "Node.js $version already installed"
         else
             log_warn "Updating Node.js to version 20..."
-            case "$os_type" in
-                *"Amazon Linux"*)
+            case "$os_family" in
+                "fedora")
                     curl -sL https://rpm.nodesource.com/setup_20.x | bash -
                     yum install -y nodejs
                     ;;
-                *"Ubuntu"*|*"Debian"*)
+                "debian")
                     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
                     apt-get install -y nodejs
                     ;;
@@ -145,13 +133,17 @@ install_node() {
 
 # Install Docker
 install_docker() {
+    local os_family=$1
     log_info "Installing Docker..."
-    local os_type=$(detect_os)
     
     if ! command -v docker &> /dev/null; then
-        case "$os_type" in
-            *"Amazon Linux"*)
-                yum install -y docker
+        case "$os_family" in
+            "fedora")
+                if grep -q "Amazon Linux" /etc/system-release 2>/dev/null; then
+                    amazon-linux-extras install docker -y
+                else
+                    yum install -y docker
+                fi
                 systemctl start docker
                 systemctl enable docker
                 # Install Docker Compose
@@ -159,7 +151,7 @@ install_docker() {
                 curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
                 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
                 ;;
-            *"Ubuntu"*|*"Debian"*)
+            "debian")
                 apt-get update
                 apt-get install -y ca-certificates curl gnupg
                 install -m 0755 -d /etc/apt/keyrings
@@ -170,8 +162,6 @@ install_docker() {
                 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
                 ;;
         esac
-        systemctl start docker
-        systemctl enable docker
         log_success "Docker installed"
     else
         log_success "Docker already installed"
@@ -180,17 +170,16 @@ install_docker() {
 
 # Install Infisical CLI
 install_infisical() {
+    local os_family=$1
     log_info "Installing Infisical CLI..."
-    local os_type=$(detect_os)
     
     if ! command -v infisical &> /dev/null; then
-        case "$os_type" in
-            *"Amazon Linux"*)
-                # Add Infisical repository for RHEL/Amazon Linux
+        case "$os_family" in
+            "fedora")
                 curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.rpm.sh' | bash
                 yum install -y infisical
                 ;;
-            *"Ubuntu"*|*"Debian"*)
+            "debian")
                 curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | bash
                 apt-get update
                 apt-get install -y infisical
@@ -204,19 +193,19 @@ install_infisical() {
 
 # Install Supabase CLI
 install_supabase() {
+    local os_family=$1
     log_info "Installing Supabase CLI..."
+    
     if ! command -v supabase &> /dev/null; then
-        local version="2.0.0"  # Update this version as needed
-        local os_type=$(detect_os)
-        
-        case "$os_type" in
-            *"Amazon Linux"*)
+        local version="2.0.0"
+        case "$os_family" in
+            "fedora")
                 wget -O /tmp/supabase.rpm \
                     "https://github.com/supabase/cli/releases/download/v${version}/supabase_${version}_linux_amd64.rpm"
                 rpm -i /tmp/supabase.rpm
                 rm /tmp/supabase.rpm
                 ;;
-            *"Ubuntu"*|*"Debian"*)
+            "debian")
                 wget -O /tmp/supabase.deb \
                     "https://github.com/supabase/cli/releases/download/v${version}/supabase_${version}_linux_amd64.deb"
                 dpkg -i /tmp/supabase.deb || apt-get install -f -y
@@ -229,35 +218,12 @@ install_supabase() {
     fi
 }
 
-# Function to show usage/help
-show_usage() {
-    echo "
-Usage: $0 [options]
-
-Options:
-    -u, --update              Update only the SFP CLI, skip other installations
-    -v, --version VERSION     Install/update to a specific version of SFP CLI
-                             (e.g., --version 1.2.3 or @web for latest)
-    -h, --help               Show this help message
-
-Environment variables:
-    FLXBL_NPM_REGISTRY_KEY    GitHub token for npm registry authentication
-
-Examples:
-    $0                       # Full installation with latest version
-    $0 --update              # Update SFP CLI to latest version
-    $0 --version 1.2.3       # Full installation with specific version
-    $0 -u -v 1.2.3           # Update only SFP CLI to version 1.2.3
-"
-}
-
 # Function to run npm commands with authentication
 npm_install_authenticated() {
     local package=$1
     local version=$2
     local token=${FLXBL_NPM_REGISTRY_KEY:-$3}
     local temp_npmrc=""
-    local exit_code=0
     
     if [ -z "$token" ]; then
         log_error "No npm registry token provided. Please set FLXBL_NPM_REGISTRY_KEY"
@@ -272,40 +238,23 @@ npm_install_authenticated() {
     fi
 
     log_info "Installing ${full_package}..."
-
-    # Function to cleanup temp files
-    cleanup() {
-        local temp_file=$1
-        if [ ! -z "$temp_file" ] && [ -f "$temp_file" ]; then
-            log_info "Cleaning up temporary npm configuration..."
-            rm -f "$temp_file"
-        fi
-    }
-
-    # Create temporary .npmrc
     temp_npmrc=$(mktemp)
     
-    # Set up cleanup trap for various signals
-    trap "cleanup '$temp_npmrc'" EXIT SIGINT SIGTERM ERR
-
-    # Configure npm
     {
         echo "@flxbl-io:registry=https://npm.pkg.github.com/"
         echo "//npm.pkg.github.com/:_authToken=${token}"
         echo "registry=https://registry.npmjs.org/"
     } > "$temp_npmrc"
     
-    # Use temporary .npmrc file
     if NPM_CONFIG_USERCONFIG="$temp_npmrc" npm install -g "${full_package}"; then
         log_success "Successfully installed ${full_package}"
-        exit_code=0
+        rm -f "$temp_npmrc"
+        return 0
     else
         log_error "Failed to install ${full_package}"
-        exit_code=1
+        rm -f "$temp_npmrc"
+        return 1
     fi
-
-    # Cleanup will happen automatically via trap
-    return $exit_code
 }
 
 # Install SFP function
@@ -313,14 +262,12 @@ install_sfp() {
     local version=$1
     log_info "Installing/Updating SFP CLI..."
     
-    # Check if sfp is already installed
     local current_version=""
     if command -v sfp &> /dev/null; then
         current_version=$(sfp --version 2>/dev/null || echo "unknown")
         log_info "Current SFP CLI version: ${current_version}"
     fi
     
-    # Show target version
     if [ -z "$version" ] || [ "$version" = "@web" ]; then
         log_info "Target: latest version (@web)"
     else
@@ -332,7 +279,6 @@ install_sfp() {
         return 1
     fi
     
-    # Show new version after update
     if command -v sfp &> /dev/null; then
         local new_version=$(sfp --version 2>/dev/null || echo "unknown")
         if [ "$current_version" != "$new_version" ]; then
@@ -345,120 +291,49 @@ install_sfp() {
 
 # Main function
 main() {
-    local update_only=false
-    local target_version=""
-
-    # Parse command line arguments
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -u|--update)
-                update_only=true
-                shift
-                ;;
-            -v|--version)
-                if [ -z "$2" ]; then
-                    log_error "Version argument is required for -v|--version"
-                    show_usage
-                    exit 1
-                fi
-                target_version="$2"
-                shift 2
-                ;;
-            -h|--help)
-                show_usage
-                exit 0
-                ;;
-            *)
-                log_error "Unknown option: $1"
-                show_usage
-                exit 1
-                ;;
-        esac
-    done
-
-    local os_type=$(detect_os)
-    log_info "Detected OS: $os_type"
-
-    if [ "$update_only" = true ]; then
-        echo "
-╔═══════════════════════════════════════╗
-║           SFP CLI Updater             ║
-╚═══════════════════════════════════════╝
-"
-        if [ ! -z "$target_version" ]; then
-            echo "Target Version: $target_version"
-        fi
-    else
-        echo "
+    echo "
 ╔═══════════════════════════════════════╗
 ║           SFP Prerequisites           ║
 ║         Installation Script           ║
 ╚═══════════════════════════════════════╝
 "
-        if [ ! -z "$target_version" ]; then
-            echo "Target SFP Version: $target_version"
-        fi
-    fi
     
     # Check if running as root
     check_root
 
-    # Check if FLXBL_NPM_REGISTRY_KEY is provided in environment
-    local github_token=${FLXBL_NPM_REGISTRY_KEY:-""}
+    # Detect OS family
+    local os_family=$(detect_os_family)
+    log_info "Detected OS family: $os_family"
     
-    # If no token in environment, prompt for it
-    if [ -z "$github_token" ]; then
-        log_warn "FLXBL_NPM_REGISTRY_KEY not set"
-        while true; do
-            read -p "Enter your GitHub Personal Access Token: " github_token
-            export FLXBL_NPM_REGISTRY_KEY="$github_token"
-            if check_github_token "$github_token"; then
-                break
-            else
-                log_error "Please ensure your token has package read access"
-                read -p "Would you like to try another token? (y/n) " retry
-                if [[ $retry != "y" ]]; then
-                    exit 1
-                fi
-            fi
-        done
-    else
-        if ! check_github_token "$github_token"; then
-            log_error "Provided FLXBL_NPM_REGISTRY_KEY is invalid or lacks required permissions"
-            exit 1
-        fi
+    if [ "$os_family" = "unknown" ]; then
+        log_error "Unsupported operating system"
+        exit 1
     fi
 
-    if [ "$update_only" = true ]; then
-        # Only update SFP CLI
-        install_sfp "$target_version"
-        
-        echo "
-╔═══════════════════════════════════════╗
-║         Update Complete! 🎉           ║
-╚═══════════════════════════════════════╝
-"
-        exit 0
-    fi
-
-    # Install basic tools based on OS
-    case "$os_type" in
-        *"Amazon Linux"*|*"Red Hat"*|*"CentOS"*)
+    # Update package manager and install basic tools
+    case "$os_family" in
+        "fedora")
             yum update -y
             yum install -y curl wget jq git
             ;;
-        *"Ubuntu"*|*"Debian"*)
+        "debian")
             apt-get update
             apt-get install -y curl wget jq git
             ;;
     esac
 
+    # Check GitHub token
+    if ! check_github_token "$FLXBL_NPM_REGISTRY_KEY"; then
+        log_error "Invalid or missing GitHub token"
+        exit 1
+    fi
+
     # Install all prerequisites
-    install_node
-    install_docker
-    install_infisical
-    install_supabase
-    install_sfp "$target_version"
+    install_node "$os_family"
+    install_docker "$os_family"
+    install_infisical "$os_family"
+    install_supabase "$os_family"
+    install_sfp
 
     # Final verification
     echo "
@@ -480,3 +355,6 @@ You can now use the 'sfp' command to manage your SFP installation.
 Get started with: sfp server init --help
 "
 }
+
+# Execute main
+main
