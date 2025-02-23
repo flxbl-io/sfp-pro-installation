@@ -216,8 +216,8 @@ npm_install_authenticated() {
     fi
 
     local full_package
-    if [ -z "$version" ] || [ "$version" = "@web" ]; then
-        full_package="${package}@web"
+    if [ -z "$version" ] || [ "$version" = "@latest" ]; then
+        full_package="${package}@latest"
     else
         full_package="${package}@${version}"
     fi
@@ -253,8 +253,8 @@ install_sfp() {
         log_info "Current SFP CLI version: ${current_version}"
     fi
     
-    if [ -z "$version" ] || [ "$version" = "@web" ]; then
-        log_info "Target: latest version (@web)"
+    if [ -z "$version" ] || [ "$version" = "@latest" ]; then
+        log_info "Target: latest version (@latest)"
     else
         log_info "Target: version ${version}"
     fi
