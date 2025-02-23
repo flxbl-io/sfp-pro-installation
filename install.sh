@@ -286,7 +286,30 @@ npm_install_authenticated() {
         echo "registry=https://registry.npmjs.org/"
     } > "$temp_npmrc"
     
-    if NPM_CONFIG_USERCONFIG="$temp_npmrc" npm install -g "${full_package}"; then
+    # Get the SUDO_USER if available, otherwise use current user
+    local actual_user=${SUDO_USER:-$USER}
+    local actual_home=$(eval echo ~$actual_user)
+    
+    # Create directories with proper permissions
+    local npm_config_dir="${actual_home}/.npm-global"
+    mkdir -p "$npm_config_dir"
+    chown -R "$actual_user" "$npm_config_dir"
+
+    # Configure npm to use custom directory
+    if ! grep -q "prefix=${npm_config_dir}" "$actual_home/.npmrc" 2>/dev/null; then
+        echo "prefix=${npm_config_dir}" >> "$actual_home/.npmrc"
+        chown "$actual_user" "$actual_home/.npmrc"
+    fi
+
+    # Add to PATH if not already there
+    local profile_file="$actual_home/.profile"
+    if ! grep -q "PATH.*${npm_config_dir}/bin" "$profile_file" 2>/dev/null; then
+        echo "export PATH=${npm_config_dir}/bin:\$PATH" >> "$profile_file"
+        chown "$actual_user" "$profile_file"
+    fi
+
+    # Install package as the actual user
+    if sudo -E -u "$actual_user" NPM_CONFIG_USERCONFIG="$temp_npmrc" npm install -g "${full_package}"; then
         log_success "Successfully installed ${full_package}"
         rm -f "$temp_npmrc"
         return 0
