@@ -13,13 +13,23 @@ CROSS="✗"
 
 # Default values
 VERSION="latest"
-SHOW_HELP=false
 
 # Print colored messages
-log_success() { printf "${GREEN}${TICK} %s${NC}\n" "$1"; }
-log_error() { printf "${RED}${CROSS} %s${NC}\n" "$1" >&2; }
-log_warn() { printf "${YELLOW}! %s${NC}\n" "$1"; }
-log_info() { printf "• %s\n" "$1"; }
+log_success() {
+    printf "${GREEN}${TICK} %s${NC}\n" "$1"
+}
+
+log_error() {
+    printf "${RED}${CROSS} %s${NC}\n" "$1" >&2
+}
+
+log_warn() {
+    printf "${YELLOW}! %s${NC}\n" "$1"
+}
+
+log_info() {
+    printf "• %s\n" "$1"
+}
 
 # Help message
 show_help() {
@@ -40,26 +50,20 @@ EOF
 # Parse command line arguments
 parse_args() {
     while [[ $# -gt 0 ]]; do
-        case $1 in
+        case "$1" in
             -v|--version)
                 VERSION="$2"
                 shift 2
                 ;;
             -h|--help)
-                SHOW_HELP=true
-                shift
+                show_help
                 ;;
             *)
                 log_error "Unknown option: $1"
                 show_help
-                exit 1
                 ;;
         esac
     done
-
-    if [ "$SHOW_HELP" = true ]; then
-        show_help
-    fi
 }
 
 # Global cleanup function
@@ -72,7 +76,7 @@ cleanup_script() {
 # Set up script-level cleanup trap
 trap cleanup_script EXIT SIGINT SIGTERM ERR
 
-# Detect if system is Fedora-based (RHEL, CentOS, Amazon Linux) or Debian-based
+# Detect if system is Fedora-based or Debian-based
 detect_os_family() {
     if [ -f /etc/redhat-release ] || [ -f /etc/system-release ]; then
         echo "fedora"
@@ -85,7 +89,7 @@ detect_os_family() {
 
 # Package manager wrapper
 pkg_install() {
-    local os_family=$1
+    local os_family="$1"
     shift
     local packages=("$@")
     
@@ -113,19 +117,19 @@ check_root() {
 
 # Function to check GitHub token
 check_github_token() {
-    local token=$1
+    local token="$1"
     log_info "Verifying GitHub token..."
     
     if [ -z "$token" ]; then
         log_error "GitHub token not provided. Please set FLXBL_NPM_REGISTRY_KEY environment variable"
         exit 1
-    }
+    fi
     
     local response
     response=$(curl -s -H "Authorization: Bearer $token" \
-                        -H "Accept: application/vnd.github+json" \
-                        https://api.github.com/user) || return 1
-    
+                   -H "Accept: application/vnd.github+json" \
+                   https://api.github.com/user)
+
     if ! echo "$response" | grep -q '"login"'; then
         log_error "Invalid GitHub token"
         return 1
@@ -133,9 +137,9 @@ check_github_token() {
 
     local pkg_response
     pkg_response=$(curl -s -H "Authorization: Bearer $token" \
-                       -H "Accept: application/vnd.github+json" \
-                       "https://api.github.com/orgs/flxbl-io/packages?package_type=npm") || return 1
-    
+                      -H "Accept: application/vnd.github+json" \
+                      "https://api.github.com/orgs/flxbl-io/packages?package_type=npm")
+
     if ! echo "$pkg_response" | grep -q "sfp"; then
         log_error "GitHub token lacks package access permissions"
         return 1
@@ -147,7 +151,7 @@ check_github_token() {
 
 # Install Node.js
 install_node() {
-    local os_family=$1
+    local os_family="$1"
     log_info "Installing Node.js..."
     
     if ! command -v node &> /dev/null; then
@@ -170,7 +174,7 @@ install_node() {
 
 # Install Docker
 install_docker() {
-    local os_family=$1
+    local os_family="$1"
     log_info "Installing Docker..."
     
     if ! command -v docker &> /dev/null; then
@@ -206,7 +210,7 @@ install_docker() {
 
 # Install Infisical CLI
 install_infisical() {
-    local os_family=$1
+    local os_family="$1"
     log_info "Installing Infisical CLI..."
     
     if ! command -v infisical &> /dev/null; then
@@ -229,7 +233,7 @@ install_infisical() {
 
 # Install Supabase CLI
 install_supabase() {
-    local os_family=$1
+    local os_family="$1"
     log_info "Installing Supabase CLI..."
     
     if ! command -v supabase &> /dev/null; then
@@ -256,9 +260,9 @@ install_supabase() {
 
 # Function to run npm commands with authentication
 npm_install_authenticated() {
-    local package=$1
-    local version=$2
-    local token=${FLXBL_NPM_REGISTRY_KEY:-$3}
+    local package="$1"
+    local version="$2"
+    local token="${FLXBL_NPM_REGISTRY_KEY:-$3}"
     local temp_npmrc=""
     
     if [ -z "$token" ]; then
@@ -295,7 +299,7 @@ npm_install_authenticated() {
 
 # Install SFP function
 install_sfp() {
-    local version=$1
+    local version="$1"
     log_info "Installing/Updating SFP CLI..."
     
     local current_version=""
@@ -341,7 +345,8 @@ main() {
     check_root
 
     # Detect OS family
-    local os_family=$(detect_os_family)
+    local os_family
+    os_family=$(detect_os_family)
     log_info "Detected OS family: $os_family"
     
     if [ "$os_family" = "unknown" ]; then
