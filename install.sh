@@ -121,26 +121,28 @@ check_github_token() {
         exit 1
     }
     
-    local response=$(curl -s -H "Authorization: Bearer $token" \
+    local response
+    response=$(curl -s -H "Authorization: Bearer $token" \
                         -H "Accept: application/vnd.github+json" \
-                        https://api.github.com/user)
+                        https://api.github.com/user) || return 1
     
-    if echo "$response" | grep -q '"login"'; then
-        local pkg_response=$(curl -s -H "Authorization: Bearer $token" \
-                               -H "Accept: application/vnd.github+json" \
-                               "https://api.github.com/orgs/flxbl-io/packages?package_type=npm")
-        
-        if echo "$pkg_response" | grep -q "sfp"; then
-            log_success "GitHub token verified - Has package access"
-            return 0
-        else
-            log_error "GitHub token lacks package access permissions"
-            return 1
-        fi
-    else
+    if ! echo "$response" | grep -q '"login"'; then
         log_error "Invalid GitHub token"
         return 1
     fi
+
+    local pkg_response
+    pkg_response=$(curl -s -H "Authorization: Bearer $token" \
+                       -H "Accept: application/vnd.github+json" \
+                       "https://api.github.com/orgs/flxbl-io/packages?package_type=npm") || return 1
+    
+    if ! echo "$pkg_response" | grep -q "sfp"; then
+        log_error "GitHub token lacks package access permissions"
+        return 1
+    fi
+
+    log_success "GitHub token verified - Has package access"
+    return 0
 }
 
 # Install Node.js
