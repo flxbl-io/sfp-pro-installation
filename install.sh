@@ -11,11 +11,56 @@ NC='\033[0m' # No Color
 TICK="✓"
 CROSS="✗"
 
+# Default values
+VERSION="latest"
+SHOW_HELP=false
+
 # Print colored messages
 log_success() { printf "${GREEN}${TICK} %s${NC}\n" "$1"; }
 log_error() { printf "${RED}${CROSS} %s${NC}\n" "$1" >&2; }
 log_warn() { printf "${YELLOW}! %s${NC}\n" "$1"; }
 log_info() { printf "• %s\n" "$1"; }
+
+# Help message
+show_help() {
+    cat << EOF
+Usage: install.sh [OPTIONS]
+
+Options:
+    -v, --version     Specify SFP version to install (default: latest)
+    -h, --help        Show this help message
+
+Example:
+    ./install.sh --version 1.2.3
+    curl -fsSL https://raw.githubusercontent.com/flxbl-io/sfp-pro-installation/main/install.sh | sudo -E bash -s -- --version 1.2.3
+EOF
+    exit 0
+}
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -v|--version)
+                VERSION="$2"
+                shift 2
+                ;;
+            -h|--help)
+                SHOW_HELP=true
+                shift
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+
+    if [ "$SHOW_HELP" = true ]; then
+        show_help
+    fi
+}
 
 # Global cleanup function
 cleanup_script() {
@@ -70,6 +115,11 @@ check_root() {
 check_github_token() {
     local token=$1
     log_info "Verifying GitHub token..."
+    
+    if [ -z "$token" ]; then
+        log_error "GitHub token not provided. Please set FLXBL_NPM_REGISTRY_KEY environment variable"
+        exit 1
+    }
     
     local response=$(curl -s -H "Authorization: Bearer $token" \
                         -H "Accept: application/vnd.github+json" \
@@ -131,7 +181,6 @@ install_docker() {
                 fi
                 systemctl start docker
                 systemctl enable docker
-                # Install Docker Compose
                 mkdir -p /usr/local/lib/docker/cli-plugins/
                 curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
                 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
@@ -182,17 +231,17 @@ install_supabase() {
     log_info "Installing Supabase CLI..."
     
     if ! command -v supabase &> /dev/null; then
-        local version="2.0.0"
+        local supabase_version="2.0.0"
         case "$os_family" in
             "fedora")
                 wget -O /tmp/supabase.rpm \
-                    "https://github.com/supabase/cli/releases/download/v${version}/supabase_${version}_linux_amd64.rpm"
+                    "https://github.com/supabase/cli/releases/download/v${supabase_version}/supabase_${supabase_version}_linux_amd64.rpm"
                 rpm -i /tmp/supabase.rpm
                 rm /tmp/supabase.rpm
                 ;;
             "debian")
                 wget -O /tmp/supabase.deb \
-                    "https://github.com/supabase/cli/releases/download/v${version}/supabase_${version}_linux_amd64.deb"
+                    "https://github.com/supabase/cli/releases/download/v${supabase_version}/supabase_${supabase_version}_linux_amd64.deb"
                 dpkg -i /tmp/supabase.deb || apt-get install -f -y
                 rm /tmp/supabase.deb
                 ;;
@@ -216,7 +265,7 @@ npm_install_authenticated() {
     fi
 
     local full_package
-    if [ -z "$version" ] || [ "$version" = "@latest" ]; then
+    if [ -z "$version" ] || [ "$version" = "latest" ]; then
         full_package="${package}@latest"
     else
         full_package="${package}@${version}"
@@ -253,8 +302,8 @@ install_sfp() {
         log_info "Current SFP CLI version: ${current_version}"
     fi
     
-    if [ -z "$version" ] || [ "$version" = "@latest" ]; then
-        log_info "Target: latest version (@latest)"
+    if [ -z "$version" ] || [ "$version" = "latest" ]; then
+        log_info "Target: latest version"
     else
         log_info "Target: version ${version}"
     fi
@@ -276,6 +325,9 @@ install_sfp() {
 
 # Main function
 main() {
+    # Parse command line arguments
+    parse_args "$@"
+
     echo "
 ╔═══════════════════════════════════════╗
 ║           SFP Prerequisites           ║
@@ -318,7 +370,7 @@ main() {
     install_docker "$os_family"
     install_infisical "$os_family"
     install_supabase "$os_family"
-    install_sfp
+    install_sfp "$VERSION"
 
     # Final verification
     echo "
@@ -341,5 +393,5 @@ Get started with: sfp server init --help
 "
 }
 
-# Execute main
-main
+# Execute main with all arguments
+main "$@"
