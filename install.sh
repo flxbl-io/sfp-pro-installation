@@ -101,7 +101,9 @@ install_node() {
     if ! command -v node &> /dev/null; then
         case "$os_family" in
             "fedora")
-                yum install -y nodejs
+                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+                source ~/.bashrc
+                nvm install --lts
                 ;;
             "debian")
                 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
